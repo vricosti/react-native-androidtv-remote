@@ -1,0 +1,46 @@
+{
+  "name": "react-native-androidtv-remote",
+  "version": "1.0.0",
+  "description": "Port of AndroidTV Remote to react native",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=14.18.1"
+  },
+  "scripts": {
+    "babel": "babel ./src/*.* --out-dir dist --delete-dir-on-start -D && babel ./src/certificate/*.* --out-dir dist/certificate -D && babel ./src/pairing/*.* --out-dir dist/pairing -D && babel ./src/remote/*.* --out-dir dist/remote -D"
+  },
+  "keywords": [
+    "androidtv",
+    "remote",
+    "freebox",
+    "freebox-player-pop",
+    "freebox-mini-4k"
+  ],
+  "author": "@vricosti",
+  "license": "ISC",
+  "dependencies": {
+    "base64-js": "^1.5.1",
+    "buffer": "^6.0.3",
+    "events": "^3.3.0",
+    "core-js": "^3.20.2",
+    "ip-regex": "^5.0.0",
+    "lodash": "^4.17.21",
+    "node-forge": "^0.10.0",
+    "protobufjs": "^6.11.2",
+    "react-native-modpow": "^1.1.0",
+    "react-native-tcp-socket": "^6.0.6",
+    "stream-browserify": "^3.0.0",
+    "util": "^0.12.5"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.16.7",
+    "@babel/core": "^7.16.7",
+    "@babel/preset-env": "^7.0.0",
+    "babel-plugin-transform-import-meta": "^2.1.0"
+  },
+  "type": "commonjs",
+  "homepage": "https://github.com/vricosti/react-native-androidtv-remote",
+  "bugs": {
+    "url": "https://github.com/vricosti/react-native-androidtv-remote/issues"
+  }
+}
