@@ -1,13 +1,17 @@
-# androidtv-remote
+# react-native-androidtv-remote
 
 [![npm-version](https://badgen.net/npm/v/androidtv-remote)](https://www.npmjs.com/package/androidtv-remote)
 [![npm-total-downloads](https://badgen.net/npm/dt/androidtv-remote)](https://www.npmjs.com/package/androidtv-remote)
 
+**This package is a port of the [Android TV Remote](https://github.com/louis49/androidtv-remote) written by @louis49 to React Native**  
 
-# Installation
+This package is not already published because it depends on a patched version of react-native-tcp-sockets.  
+
+
+# Installation (NOT YET PUBLISHED)
 
 ```
-npm install androidtv-remote
+npm install react-native-androidtv-remote
 ```
 
 # Usage
@@ -19,8 +23,20 @@ let host = "192.168.1.12";
 let options = {
     pairing_port : 6467,
     remote_port : 6466,
-    name : 'androidtv-remote',
-    cert: {},
+    service_name: 'com.urcompany.appname',
+    systeminfo: {
+      manufacturer: 'default-manufacturer',
+      model: 'default-model'
+      },
+      // Mandatory for the connection to work on android and needs patched version of
+      // react-native-tcp-socket
+      cert: {
+        key: null,
+        cert: null,
+        androidKeyStore: 'AndroidKeyStore',
+        certAlias: 'my-remotectl-atv-cert',
+        keyAlias: 'my-remotectl-atv',
+      }
 }
 
 let androidRemote = new AndroidRemote(host, options)
