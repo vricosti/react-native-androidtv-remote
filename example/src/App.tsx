@@ -78,7 +78,7 @@ function App(): React.JSX.Element {
     const options = {
       pairing_port: 6467,
       remote_port: 6466,
-      service_name: 'com.lotalogic.lota-remotectl',
+      service_name: 'com.vricosti.androidtv.example',
       systeminfo: {
         manufacturer: 'default-manufacturer',
         model: 'default-model',
@@ -87,8 +87,8 @@ function App(): React.JSX.Element {
         key: certificateRef.current.get(selectedDevice)?.key || null,
         cert: certificateRef.current.get(selectedDevice)?.cert || null,
         androidKeyStore: 'AndroidKeyStore',
-        certAlias: 'lota-remotectl-atv-cert',
-        keyAlias: 'lota-remotectl-atv',
+        certAlias: 'remotectl-atv-cert',
+        keyAlias: 'remotectl-atv',
       },
     };
 

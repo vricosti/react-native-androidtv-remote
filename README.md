@@ -51,8 +51,10 @@ yarn install
 cd ios
 pod install
 cd ..
-yarn start
+yarn ios
 ```
+
+If you want to deploy on a real iPhone device you might need to open TestAndroidTVRemoteApp.xcworkspace, double click on TestAndroidTVRemoteApp on the left and goes to 'Signing and Capabilities' to check 'Automatically manage signing' and choose your Team.  
 
 on another terminal:  
 `yarn ios`
