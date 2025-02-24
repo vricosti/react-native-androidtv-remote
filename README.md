@@ -31,6 +31,8 @@ So inside your project add patch-package:
 
 # Example
 
+https://github.com/user-attachments/assets/49347b02-1d68-4b0c-8c3b-fcebb2da1c0c
+
 To run the example:  
 
 #### android
