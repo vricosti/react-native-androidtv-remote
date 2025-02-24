@@ -1,6 +1,6 @@
 {
   "name": "react-native-androidtv-remote",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Port of AndroidTV Remote to react native",
   "main": "dist/index.js",
   "files": [
