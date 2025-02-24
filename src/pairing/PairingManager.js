@@ -4,6 +4,7 @@ import {Buffer} from "buffer";
 import EventEmitter from "events";
 import TcpSockets from 'react-native-tcp-socket';
 
+//import RNFS from 'react-native-fs';
 
 class PairingManager extends EventEmitter {
 
@@ -15,7 +16,36 @@ class PairingManager extends EventEmitter {
         this.certs = certs;
         this.service_name = service_name;
         this.pairingMessageManager = new PairingMessageManager(systeminfo);
+        this.isCancelled = false;
     }
+
+    /*
+    async logCertificates(clientCert, serverCert) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const logDir = `${RNFS.DocumentDirectoryPath}/logs`;
+        const logFile = `${logDir}/certificates-${timestamp}.log`;
+      
+        try {
+          // Create logs directory if it doesn't exist
+          await RNFS.mkdir(logDir, { NSURLIsExcludedFromBackupKey: true });
+      
+          const logContent = `
+      === Certificate Log Generated at ${new Date().toISOString()} ===
+      Client Certificate:
+      ${JSON.stringify(clientCert, null, 2)}
+      Server Certificate:
+      ${JSON.stringify(serverCert, null, 2)}
+      `;
+      
+          await RNFS.writeFile(logFile, logContent, 'utf8');
+          console.debug(`Certificates logged to: ${logFile}`);
+      
+          // Log the full path for debugging
+          console.debug('Document Directory:', RNFS.DocumentDirectoryPath);
+        } catch (error) {
+          console.error('Error writing certificate logs:', error);
+        }
+      }*/
 
     async sendCode(code){
         console.debug("Sending code : ", code);
@@ -23,7 +53,7 @@ class PairingManager extends EventEmitter {
 
         let client_certificate = await this.client.getCertificate();
         let server_certificate = await this.client.getPeerCertificate();
-
+        //await this.logCertificates(client_certificate, server_certificate);
         let sha256 = forge.md.sha256.create();
 
         sha256.update(forge.util.hexToBytes(client_certificate.modulus), 'raw');
@@ -36,13 +66,21 @@ class PairingManager extends EventEmitter {
         let hash_array = Array.from(hash, c => c.charCodeAt(0) & 0xff);
         let check = hash_array[0];
         if (check !== code_bytes[0]){
+            console.error("Code validation failed");
             this.client.destroy(new Error("Bad Code"));
             return false;
         }
         else {
+            console.debug("Code validated, sending pairing secret");
             this.client.write(this.pairingMessageManager.createPairingSecret(hash_array));
             return true;
         }
+    }
+
+    cancelPairing() {
+        this.isCancelled = true;
+        this.client.destroy(new Error("Pairing canceled"));
+        return false;
     }
 
     async start() {
@@ -60,11 +98,12 @@ class PairingManager extends EventEmitter {
                 keyAlias: this.certs.keyAlias,
             };
             
-
+            //console.debug('PairingManager.start(): before connectTLS');
             this.client = TcpSockets.connectTLS(options, () => {
                 console.debug(this.host + " Pairing connected");
             });
 
+            this.isCancelled = false;
             this.client.pairingManager = this;
 
             this.client.on("secureConnect", () => {
@@ -109,11 +148,17 @@ class PairingManager extends EventEmitter {
             });
 
             this.client.on('close', (hasError) => {
-                console.debug(this.host + " Pairing Connection closed", hasError);
-                if(hasError){
+                if(hasError) {
+                    console.log('PairingManager.close() failure');
+                    reject(false);
+                }
+                else if (this.isCancelled) {
+                    console.log('PairingManager.close() on cancelPairing()');
+                    this.isCancelled = false;
                     reject(false);
                 }
                 else{
+                    console.log('PairingManager.close() success');
                     resolve(true);
                 }
             });

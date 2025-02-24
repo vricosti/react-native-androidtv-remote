@@ -16,6 +16,8 @@ var _reactNativeTcpSocket = _interopRequireDefault(require("react-native-tcp-soc
 function _interopRequireDefault(e) { return e && e.__esModule ? e : { default: e }; }
 function asyncGeneratorStep(n, t, e, r, o, a, c) { try { var i = n[a](c), u = i.value; } catch (n) { return void e(n); } i.done ? t(u) : Promise.resolve(u).then(r, o); }
 function _asyncToGenerator(n) { return function () { var t = this, e = arguments; return new Promise(function (r, o) { var a = n.apply(t, e); function _next(n) { asyncGeneratorStep(a, r, o, _next, _throw, "next", n); } function _throw(n) { asyncGeneratorStep(a, r, o, _next, _throw, "throw", n); } _next(void 0); }); }; }
+//import RNFS from 'react-native-fs';
+
 class PairingManager extends _events.default {
   constructor(host, port, certs, service_name, systeminfo) {
     super();
@@ -25,7 +27,37 @@ class PairingManager extends _events.default {
     this.certs = certs;
     this.service_name = service_name;
     this.pairingMessageManager = new _PairingMessageManager.PairingMessageManager(systeminfo);
+    this.isCancelled = false;
   }
+
+  /*
+  async logCertificates(clientCert, serverCert) {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const logDir = `${RNFS.DocumentDirectoryPath}/logs`;
+      const logFile = `${logDir}/certificates-${timestamp}.log`;
+    
+      try {
+        // Create logs directory if it doesn't exist
+        await RNFS.mkdir(logDir, { NSURLIsExcludedFromBackupKey: true });
+    
+        const logContent = `
+    === Certificate Log Generated at ${new Date().toISOString()} ===
+    Client Certificate:
+    ${JSON.stringify(clientCert, null, 2)}
+    Server Certificate:
+    ${JSON.stringify(serverCert, null, 2)}
+    `;
+    
+        await RNFS.writeFile(logFile, logContent, 'utf8');
+        console.debug(`Certificates logged to: ${logFile}`);
+    
+        // Log the full path for debugging
+        console.debug('Document Directory:', RNFS.DocumentDirectoryPath);
+      } catch (error) {
+        console.error('Error writing certificate logs:', error);
+      }
+    }*/
+
   sendCode(code) {
     var _this = this;
     return _asyncToGenerator(function* () {
@@ -33,6 +65,7 @@ class PairingManager extends _events.default {
       var code_bytes = _this.hexStringToBytes(code);
       var client_certificate = yield _this.client.getCertificate();
       var server_certificate = yield _this.client.getPeerCertificate();
+      //await this.logCertificates(client_certificate, server_certificate);
       var sha256 = _nodeForge.default.md.sha256.create();
       sha256.update(_nodeForge.default.util.hexToBytes(client_certificate.modulus), 'raw');
       sha256.update(_nodeForge.default.util.hexToBytes("0" + client_certificate.exponent.slice(2)), 'raw');
@@ -43,13 +76,20 @@ class PairingManager extends _events.default {
       var hash_array = Array.from(hash, c => c.charCodeAt(0) & 0xff);
       var check = hash_array[0];
       if (check !== code_bytes[0]) {
+        console.error("Code validation failed");
         _this.client.destroy(new Error("Bad Code"));
         return false;
       } else {
+        console.debug("Code validated, sending pairing secret");
         _this.client.write(_this.pairingMessageManager.createPairingSecret(hash_array));
         return true;
       }
     })();
+  }
+  cancelPairing() {
+    this.isCancelled = true;
+    this.client.destroy(new Error("Pairing canceled"));
+    return false;
   }
   start() {
     var _this2 = this;
@@ -67,9 +107,12 @@ class PairingManager extends _events.default {
           certAlias: _this2.certs.certAlias,
           keyAlias: _this2.certs.keyAlias
         };
+
+        //console.debug('PairingManager.start(): before connectTLS');
         _this2.client = _reactNativeTcpSocket.default.connectTLS(options, () => {
           console.debug(_this2.host + " Pairing connected");
         });
+        _this2.isCancelled = false;
         _this2.client.pairingManager = _this2;
         _this2.client.on("secureConnect", () => {
           console.debug(_this2.host + " Pairing secure connected ");
@@ -102,10 +145,15 @@ class PairingManager extends _events.default {
           }
         });
         _this2.client.on('close', hasError => {
-          console.debug(_this2.host + " Pairing Connection closed", hasError);
           if (hasError) {
+            console.log('PairingManager.close() failure');
+            reject(false);
+          } else if (_this2.isCancelled) {
+            console.log('PairingManager.close() on cancelPairing()');
+            _this2.isCancelled = false;
             reject(false);
           } else {
+            console.log('PairingManager.close() success');
             resolve(true);
           }
         });

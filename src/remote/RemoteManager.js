@@ -13,6 +13,7 @@ class RemoteManager extends EventEmitter {
         this.chunks = Buffer.from([]);
         this.error = null;
         this.remoteMessageManager = new RemoteMessageManager(systeminfo);
+        this.isManualStop = false;
     }
 
     async start() {
@@ -32,7 +33,9 @@ class RemoteManager extends EventEmitter {
             };
             
             console.debug("Start Remote Connect");
-
+            this.isManualStop = false;
+            
+            //console.debug('RemoteManager.start(): before connectTLS');
             this.client = TcpSockets.connectTLS(options, () => {
                 console.debug("Remote connected")
             });
@@ -112,7 +115,7 @@ class RemoteManager extends EventEmitter {
                         //console.debug("Receive SET PREFERRED AUDIO DEVICE" + message.remoteSetPreferredAudioDevice);
                     }
                     else if(message.remoteError){
-                        //console.debug("Receive REMOTE ERROR");
+                        console.debug("Receive REMOTE ERROR");
                         this.emit('error', {error : message.remoteError});
                     }
                     else{
@@ -124,12 +127,23 @@ class RemoteManager extends EventEmitter {
 
             this.client.on('close', async (hasError) => {
                 console.info(this.host + " Remote Connection closed ", hasError);
+                
+                // Don't restart if it was manually stopped
+                if (this.isManualStop) {
+                    console.log('RemoteManager.close() after manual stop - not restarting');
+                    this.isManualStop = false; // Reset flag for future connections
+                    return;
+                }
+
                 if(hasError){
+                    console.log('RemoteManager.close() hasError');
                     reject(this.error.code);
                     if(this.error.code === "ECONNRESET"){
+                        console.log('RemoteManager.close() hasError ECONNRESET');
                         this.emit('unpaired');
                     }
                     else if(this.error.code === "ECONNREFUSED"){
+                        console.log('RemoteManager.close() hasError ECONNREFUSED');
                         // L'appareil n'est pas encore prêt : on relance
                         await new Promise(resolve => setTimeout(resolve, 1000));
                         await this.start().catch((error) => {
@@ -138,9 +152,11 @@ class RemoteManager extends EventEmitter {
                     }
                     else if(this.error.code === "EHOSTDOWN"){
                         // L'appareil est down, on ne fait rien
+                        console.log('RemoteManager.close() hasError EHOSTDOWN');
                     }
                     else{
                         // Dans le doute on redémarre
+                        console.log('RemoteManager.close() unknown error => start again');
                         await new Promise(resolve => setTimeout(resolve, 1000));
                         await this.start().catch((error) => {
                             console.error(error);
@@ -149,6 +165,7 @@ class RemoteManager extends EventEmitter {
                 }
                 else {
                     // Si pas d'erreur on relance. Si elle s'est éteinte alors une erreur empéchera de relancer encore
+                    console.log('RemoteManager.close() no error => start again');
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     await this.start().catch((error) => {
                         console.error(error);
@@ -181,6 +198,7 @@ class RemoteManager extends EventEmitter {
     }
 
     stop(){
+        this.isManualStop = true;
         this.client.destroy();
     }
 }

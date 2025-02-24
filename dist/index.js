@@ -33,26 +33,28 @@ class AndroidRemote extends _events.default {
       manufacturer: "default manufacturer",
       model: "default model"
     };
+    this.remoteManager = null;
+    this.pairingManager = null;
   }
   start() {
     var _this = this;
     return _asyncToGenerator(function* () {
-      console.log('AndroidRemote.start');
-      if (!_this.cert.key || !_this.cert.cert) {
-        //console.log('before CertificateGenerator.generateFull');
-
-        var androidKeyStore = _this.cert.androidKeyStore;
-        var certAlias = _this.cert.certAlias;
-        var keyAlias = _this.cert.keyAlias;
+      if (_this.remoteManager) {
+        console.log('AndroidRemote.start() has already been started...');
+        return;
+      }
+      console.log('AndroidRemote.start()');
+      if (!_this.cert || !_this.cert.key || !_this.cert.cert) {
         _this.cert = _CertificateGenerator.CertificateGenerator.generateFull(_this.service_name);
-        _this.cert.androidKeyStore = androidKeyStore;
-        _this.cert.certAlias = certAlias;
-        _this.cert.keyAlias = keyAlias;
+        console.log('Before creating PairingManager');
+        // Clean up any existing pairing manager
+        if (_this.pairingManager) {
+          _this.pairingManager.removeAllListeners();
+          _this.pairingManager = null;
+        }
         _this.pairingManager = new _PairingManager.PairingManager(_this.host, _this.pairing_port, _this.cert, _this.service_name, _this.systeminfo);
         _this.pairingManager.on('secret', () => _this.emit('secret'));
-        var paired = yield _this.pairingManager.start().catch(error => {
-          console.error(error);
-        });
+        var paired = yield _this.pairingManager.start();
         if (!paired) {
           return;
         }
@@ -70,18 +72,25 @@ class AndroidRemote extends _events.default {
       return started;
     })();
   }
-  initCertificate(certs) {}
-  sendCode(code) {
-    return this.pairingManager.sendCode(code);
+  sendPairingCode(code) {
+    var _this$pairingManager;
+    return (_this$pairingManager = this.pairingManager) === null || _this$pairingManager === void 0 ? void 0 : _this$pairingManager.sendCode(code);
+  }
+  cancelPairing() {
+    var _this$pairingManager2;
+    return (_this$pairingManager2 = this.pairingManager) === null || _this$pairingManager2 === void 0 ? void 0 : _this$pairingManager2.cancelPairing();
   }
   sendPower() {
-    return this.remoteManager.sendPower();
+    var _this$remoteManager;
+    return (_this$remoteManager = this.remoteManager) === null || _this$remoteManager === void 0 ? void 0 : _this$remoteManager.sendPower();
   }
   sendAppLink(app_link) {
-    return this.remoteManager.sendAppLink(app_link);
+    var _this$remoteManager2;
+    return (_this$remoteManager2 = this.remoteManager) === null || _this$remoteManager2 === void 0 ? void 0 : _this$remoteManager2.sendAppLink(app_link);
   }
   sendKey(key, direction) {
-    return this.remoteManager.sendKey(key, direction);
+    var _this$remoteManager3;
+    return (_this$remoteManager3 = this.remoteManager) === null || _this$remoteManager3 === void 0 ? void 0 : _this$remoteManager3.sendKey(key, direction);
   }
   getCertificate() {
     return {
@@ -90,7 +99,18 @@ class AndroidRemote extends _events.default {
     };
   }
   stop() {
-    this.remoteManager.stop();
+    // Remove event listeners from remoteManager
+    if (this.remoteManager) {
+      this.remoteManager.removeAllListeners(); // Use removeAllListeners() instead of individual removes
+      this.remoteManager.stop();
+      this.remoteManager = null;
+    }
+
+    // Remove event listeners from pairingManager
+    if (this.pairingManager) {
+      this.pairingManager.removeAllListeners();
+      this.pairingManager = null;
+    }
   }
 }
 exports.AndroidRemote = AndroidRemote;

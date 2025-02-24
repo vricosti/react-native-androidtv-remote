@@ -1,18 +1,59 @@
 # react-native-androidtv-remote
 
-[![npm-version](https://badgen.net/npm/v/androidtv-remote)](https://www.npmjs.com/package/androidtv-remote)
-[![npm-total-downloads](https://badgen.net/npm/dt/androidtv-remote)](https://www.npmjs.com/package/androidtv-remote)
-
 **This package is a port of the [Android TV Remote](https://github.com/louis49/androidtv-remote) written by @louis49 to React Native**  
+- License: MIT (see LICENSE file)
 
-This package is not already published because it depends on a patched version of react-native-tcp-sockets.  
+It has beeen modified to replace modpow that is too slow on ios/android during the generation of the certificate 
+and I have added the possibility to use a certificate when using react-native-tcp-sockets (dev/more-node-tls-compliant-ios).  
 
 
-# Installation (NOT YET PUBLISHED)
+# Installation
+
+Install the library using either yarn:   
+
+`yarn add react-native-androidtv-remote react-native-modpow`
+
+or npm:  
+
+`npm install --save react-native-androidtv-remote react-native-modpow`
+
+At the time of writing these instructions, my dev/more-node-tls-compliant-ios branch has not yet been merged into react-native-tcp-sockets, so it is necessary to patch it using patch-package.  
+So inside your project add patch-package:  
+
+`yarn add patch-package` and copy the folder example/patches inside your project and add inside package.json:  
 
 ```
-npm install react-native-androidtv-remote
+"scripts": {
+    ...
+    "postinstall": "patch-package"
+  },
 ```
+
+# Example
+
+To run the example:  
+
+#### android
+```
+cd example
+yarn install
+yarn start
+```
+on another terminal:  
+`yarn android`  
+
+#### iOS
+```
+cd example
+yarn install
+cd ios
+pod install
+cd ..
+yarn start
+```
+
+on another terminal:  
+`yarn ios`
 
 # Usage
 

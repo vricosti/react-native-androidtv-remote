@@ -1,0 +1,1124 @@
+diff --git a/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/SSLCertificateHelper.java b/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/SSLCertificateHelper.java
+index 9d830cb..1e0622f 100644
+--- a/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/SSLCertificateHelper.java
++++ b/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/SSLCertificateHelper.java
+@@ -80,6 +80,27 @@ final class SSLCertificateHelper {
+         return sslContext.getServerSocketFactory();
+     }
+ 
++    static boolean hasIdentity(ReadableMap options) {
++        try {
++            final String keystoreName = options.hasKey("androidKeyStore") ?
++                    options.getString("androidKeyStore") : KeyStore.getDefaultType();
++            final String keyAlias = options.hasKey("keyAlias") ?
++                    options.getString("keyAlias") : "";
++
++            if (keyAlias.isEmpty()) {
++                return false;
++            }
++
++            KeyStore keyStore = KeyStore.getInstance(keystoreName);
++            keyStore.load(null, null);
++
++            // Check if key entry exists with its certificate chain
++            return keyStore.isKeyEntry(keyAlias);
++        } catch (Exception e) {
++            return false;
++        }
++    }
++    
+     public static PrivateKey getPrivateKeyFromPEM(InputStream keyStream) {
+         try (PemReader pemReader = new PemReader(new InputStreamReader(keyStream))) {
+             PemObject pemObject = pemReader.readPemObject();
+@@ -127,29 +148,35 @@ final class SSLCertificateHelper {
+             final KeystoreInfo keystoreInfo) throws IOException, GeneralSecurityException {
+ 
+         SSLSocketFactory ssf = null;
+-        if (optionResCert != null && optionResKey != null) {
+-            final String keyStoreName = keystoreInfo.getKeystoreName().isEmpty() ?
++
++        KeyStore keyStore  = null;
++        final String keyStoreName = keystoreInfo.getKeystoreName().isEmpty() ?
+                     KeyStore.getDefaultType() :
+                     keystoreInfo.getKeystoreName();
+-            KeyStore keyStore = KeyStore.getInstance(keyStoreName);
+-            keyStore.load(null, null);
++        String keyAlias = keystoreInfo.getKeyAlias();
+ 
+-            // Check if cert and key if already registered inside our keystore
+-            // If one is missing we insert again
+-            boolean hasCertInStore = keyStore.isCertificateEntry(keystoreInfo.getCertAlias());
+-            boolean hasKeyInStore = keyStore.isKeyEntry(keystoreInfo.getKeyAlias());
+-            if (!hasCertInStore || !hasKeyInStore) {
+-                InputStream certInput = getResolvableinputStream(context, optionResCert);
+-                Certificate cert = CertificateFactory.getInstance("X.509").generateCertificate(certInput);
+-                keyStore.setCertificateEntry(keystoreInfo.getCertAlias(), cert);
+-
+-                InputStream keyInput = getResolvableinputStream(context, optionResKey);
+-                PrivateKey privateKey = getPrivateKeyFromPEM(keyInput);
+-                keyStore.setKeyEntry(keystoreInfo.getKeyAlias(), privateKey, null, new Certificate[]{cert});
++        // if user provides keyAlias without key it means an identity(cert+key) has already been
++        // inserted in keychain.
++        if (keyAlias != null && !keyAlias.isEmpty() && optionResKey == null) {
++            keyStore = KeyStore.getInstance(keyStoreName);
++            keyStore.load(null, null);
++            if (!keyStore.isKeyEntry(keyAlias)) {
++                keyStore = null;
+             }
++        } else if (optionResCert != null && optionResKey != null) {
++            
++            keyStore = KeyStore.getInstance(keyStoreName);
++            keyStore.load(null, null);
+ 
+-            boolean hasCaInStore = keyStore.isCertificateEntry(keystoreInfo.getCaAlias());
+-            if (optionResCa != null && !hasCaInStore) {
++            InputStream certInput = getResolvableinputStream(context, optionResCert);
++            Certificate cert = CertificateFactory.getInstance("X.509").generateCertificate(certInput);
++            keyStore.setCertificateEntry(keystoreInfo.getCertAlias(), cert);
++
++            InputStream keyInput = getResolvableinputStream(context, optionResKey);
++            PrivateKey privateKey = getPrivateKeyFromPEM(keyInput);
++            keyStore.setKeyEntry(keystoreInfo.getKeyAlias(), privateKey, null, new Certificate[]{cert});
++
++            if (optionResCa != null) {
+                 InputStream caInput = getResolvableinputStream(context, optionResCa);
+                 // Generate the CA Certificate from the raw resource file
+                 Certificate ca = CertificateFactory.getInstance("X.509").generateCertificate(caInput);
+@@ -157,7 +184,9 @@ final class SSLCertificateHelper {
+                 // Load the key store using the CA
+                 keyStore.setCertificateEntry(keystoreInfo.getCaAlias(), ca);
+             }
++        } 
+         
++        if (keyStore != null) {
+             // Initialize the KeyManagerFactory with this cert
+             KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+             keyManagerFactory.init(keyStore, new char[0]);
+@@ -166,7 +195,6 @@ final class SSLCertificateHelper {
+             SSLContext sslContext = SSLContext.getInstance("TLS");
+             sslContext.init(keyManagerFactory.getKeyManagers(), new TrustManager[]{new BlindTrustManager()}, null);
+             return sslContext.getSocketFactory();
+-
+         } else {
+             // Keep old behavior
+             InputStream caInput = getResolvableinputStream(context, optionResCa);
+@@ -174,7 +202,7 @@ final class SSLCertificateHelper {
+             Certificate ca = CertificateFactory.getInstance("X.509").generateCertificate(caInput);
+             caInput.close();
+             // Load the key store using the CA
+-            KeyStore keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
++            keyStore = KeyStore.getInstance(KeyStore.getDefaultType());
+             keyStore.load(null, null);
+             keyStore.setCertificateEntry("ca", ca);
+ 
+diff --git a/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketClient.java b/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketClient.java
+index 6e745a4..6ef8269 100644
+--- a/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketClient.java
++++ b/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketClient.java
+@@ -87,9 +87,13 @@ class TcpSocketClient extends TcpSocket {
+         }
+         return false;
+     }
++
+     private ResolvableOption getResolvableOption(ReadableMap tlsOptions, String key) {
+         if (tlsOptions.hasKey(key)) {
+             String value = tlsOptions.getString(key);
++            if (value == null || value.isEmpty()) {
++                return null;
++            }
+             ReadableArray resolvedKeys = tlsOptions.hasKey("resolvedKeys") ? tlsOptions.getArray("resolvedKeys") : null;
+             boolean needsResolution = resolvedKeys != null && containsKey(resolvedKeys, key);
+             return new ResolvableOption(value, needsResolution);
+@@ -110,7 +114,8 @@ class TcpSocketClient extends TcpSocket {
+         final KeystoreInfo keystoreInfo = new KeystoreInfo(keystoreName, caAlias, certAlias, keyAlias);
+ 
+         if (tlsOptions.hasKey("rejectUnauthorized") && !tlsOptions.getBoolean("rejectUnauthorized")) {
+-            if (customTlsKey != null && customTlsCert != null ) {
++            if ((customTlsKey != null && customTlsCert != null) ||
++                    (keyAlias != null && !keyAlias.isEmpty() && customTlsKey == null) ) {
+                 ssf = SSLCertificateHelper.createCustomTrustedSocketFactory(
+                         context,
+                         customTlsCa,
+diff --git a/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketModule.java b/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketModule.java
+index 326f7ef..c8f791f 100644
+--- a/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketModule.java
++++ b/node_modules/react-native-tcp-socket/android/src/main/java/com/asterinet/react/tcpsocket/TcpSocketModule.java
+@@ -384,6 +384,16 @@ public class TcpSocketModule extends ReactContextBaseJavaModule {
+         return (TcpSocketServer) socket;
+     }
+ 
++    @SuppressWarnings("unused")
++    @ReactMethod
++    public void hasIdentity(@NonNull final ReadableMap options, Promise promise) {
++        try {
++            promise.resolve(SSLCertificateHelper.hasIdentity(options));
++        } catch (Exception e) {
++            promise.reject(e);
++        }
++    }
++
+     @SuppressWarnings("unused")
+     @ReactMethod
+     public void getPeerCertificate(final int cId, Promise promise) {
+diff --git a/node_modules/react-native-tcp-socket/ios/TcpSocketClient.h b/node_modules/react-native-tcp-socket/ios/TcpSocketClient.h
+index abbdd82..aa74c26 100644
+--- a/node_modules/react-native-tcp-socket/ios/TcpSocketClient.h
++++ b/node_modules/react-native-tcp-socket/ios/TcpSocketClient.h
+@@ -19,6 +19,18 @@ typedef enum RCTTCPError RCTTCPError;
+ 
+ @class TcpSocketClient;
+ 
++// Add ResolvableOption interface here
++@interface ResolvableOption : NSObject
++
++@property (nonatomic, strong, readonly) NSString *value;
++@property (nonatomic, readonly) BOOL needsResolution;
++
++- (instancetype)initWithValue:(NSString *)value needsResolution:(BOOL)needsResolution;
+++ (instancetype)optionWithValue:(NSString *)value needsResolution:(BOOL)needsResolution;
++- (NSString *)resolve;
++
++@end
++
+ @protocol SocketClientDelegate <NSObject>
+ 
+ - (void)addClient:(TcpSocketClient *)client;
+@@ -115,4 +127,18 @@ typedef enum RCTTCPError RCTTCPError;
+ 
+ - (void)resume;
+ 
+++ (BOOL)hasIdentity:(NSDictionary *)aliases;
++
++/**
++ * Get peer certificate information
++ * @return NSDictionary with certificate information or nil if not available
++ */
++- (NSDictionary *)getPeerCertificate;
++
++/**
++ * Get local certificate information
++ * @return NSDictionary with certificate information or nil if not available
++ */
++- (NSDictionary *)getCertificate;
++
+ @end
+diff --git a/node_modules/react-native-tcp-socket/ios/TcpSocketClient.m b/node_modules/react-native-tcp-socket/ios/TcpSocketClient.m
+index 80e22d5..ad52d6c 100644
+--- a/node_modules/react-native-tcp-socket/ios/TcpSocketClient.m
++++ b/node_modules/react-native-tcp-socket/ios/TcpSocketClient.m
+@@ -5,15 +5,58 @@
+ 
+ #import <React/RCTLog.h>
+ 
++#import <CommonCrypto/CommonDigest.h>
++#import <Security/SecCertificate.h>
++#import <Security/SecImportExport.h>
++#import <Security/SecItem.h>
++#import <Security/SecKey.h>
++#import <Security/SecPolicy.h>
++#import <Security/Security.h>
++
+ NSString *const RCTTCPErrorDomain = @"RCTTCPErrorDomain";
+ 
++@implementation ResolvableOption
++
++- (instancetype)initWithValue:(NSString *)value
++              needsResolution:(BOOL)needsResolution {
++    if (self = [super init]) {
++        _value = value;
++        _needsResolution = needsResolution;
++    }
++    return self;
++}
++
+++ (instancetype)optionWithValue:(NSString *)value
++                needsResolution:(BOOL)needsResolution {
++    return [[self alloc] initWithValue:value needsResolution:needsResolution];
++}
++
++- (NSString *)resolve {
++    if (!self.needsResolution) {
++        return self.value;
++    }
++
++    NSURL *url = [[NSURL alloc] initWithString:self.value];
++    NSError *error = nil;
++    NSString *contents =
++        [[NSString alloc] initWithContentsOfURL:url
++                                       encoding:NSUTF8StringEncoding
++                                          error:&error];
++    if (error) {
++        return nil;
++    }
++    return contents;
++}
++
++@end
++
+ @interface TcpSocketClient () {
+   @private
+     BOOL _tls;
+     BOOL _checkValidity;
+     BOOL _paused;
+     BOOL _connecting;
+-    NSString *_certPath;
++    ResolvableOption *_resolvableCaCert;
+     NSString *_host;
+     GCDAsyncSocket *_tcpSocket;
+     NSMutableDictionary<NSNumber *, NSNumber *> *_pendingSends;
+@@ -21,6 +64,8 @@ @interface TcpSocketClient () {
+     NSLock *_lock;
+     NSNumber *_serverId;
+     long _sendTag;
++    SecTrustRef _peerTrust;
++    SecIdentityRef _clientIdentity;
+ }
+ 
+ - (id)initWithClientId:(NSNumber *)clientID
+@@ -48,7 +93,10 @@ + (id)socketClientWithId:(nonnull NSNumber *)clientID
+ 
+ - (id)initWithClientId:(NSNumber *)clientID
+              andConfig:(id<SocketClientDelegate>)aDelegate {
+-    return [self initWithClientId:clientID andConfig:aDelegate andSocket:nil andServer:nil];
++    return [self initWithClientId:clientID
++                        andConfig:aDelegate
++                        andSocket:nil
++                        andServer:nil];
+ }
+ 
+ - (id)initWithClientId:(NSNumber *)clientID
+@@ -120,10 +168,25 @@ - (BOOL)connect:(NSString *)host
+     return result;
+ }
+ 
++- (ResolvableOption *)getResolvableOption:(NSDictionary *)tlsOptions
++                                   forKey:(NSString *)key {
++    id value = [tlsOptions objectForKey:key];
++    if (!value || ![value isKindOfClass:[NSString class]] || [(NSString *)value length] == 0) {
++        return nil;
++    }
++
++    NSArray *resolvedKeys = tlsOptions[@"resolvedKeys"];
++    BOOL needsResolution = resolvedKeys != nil && [resolvedKeys containsObject:key];
++
++    return [ResolvableOption optionWithValue:(NSString *)value
++                             needsResolution:needsResolution];
++}
++
+ - (void)startTLS:(NSDictionary *)tlsOptions {
+-    if (_tls) return;
++    if (_tls)
++        return;
+     NSMutableDictionary *settings = [NSMutableDictionary dictionary];
+-    NSString *certResourcePath = tlsOptions[@"ca"];
++    _resolvableCaCert = [self getResolvableOption:tlsOptions forKey:@"ca"];
+     BOOL checkValidity = (tlsOptions[@"rejectUnauthorized"]
+                               ? [tlsOptions[@"rejectUnauthorized"] boolValue]
+                               : true);
+@@ -132,15 +195,59 @@ - (void)startTLS:(NSDictionary *)tlsOptions {
+         _checkValidity = false;
+         [settings setObject:[NSNumber numberWithBool:YES]
+                      forKey:GCDAsyncSocketManuallyEvaluateTrust];
+-    } else if (certResourcePath != nil) {
++    } else if (_resolvableCaCert != nil) {
+         // Self-signed certificate
+-        _certPath = certResourcePath;
+         [settings setObject:[NSNumber numberWithBool:YES]
+                      forKey:GCDAsyncSocketManuallyEvaluateTrust];
+     } else {
+         // Default certificates
+         [settings setObject:_host forKey:(NSString *)kCFStreamSSLPeerName];
+     }
++    /////////////////////////////////////////////////////////////////////////////////////////////////////////////:
++    // Handle client certificate authentication
++    /////////////////////////////////////////////////////////////////////////////////////////////////////////////:
++    SecIdentityRef myIdent = NULL;
++    ResolvableOption *resolvableKey = [self getResolvableOption:tlsOptions forKey:@"key"];
++    ResolvableOption *resolvableCert = [self getResolvableOption:tlsOptions forKey:@"cert"];
++    NSString *keyAlias = tlsOptions[@"keyAlias"];
++    if (keyAlias) { [settings setObject:keyAlias forKey:@"keyAlias"]; }
++    NSString *certAlias = tlsOptions[@"certAlias"];
++    if (certAlias) { [settings setObject:certAlias forKey:@"certAlias"]; }
++    
++    // if user provides certAlias without cert it means an identity(cert+key) has already been
++    //  inserted in keychain.
++    if ((certAlias && certAlias.length > 0) && (!resolvableCert)) {
++        //RCTLogWarn(@"startTLS: Trying to find existing identity with certAlias %@", certAlias);
++        NSDictionary *identityQuery = @{
++            (__bridge id)kSecClass : (__bridge id)kSecClassIdentity,
++            (__bridge id)kSecReturnRef : @YES,
++            (__bridge id)kSecAttrLabel : certAlias
++        };
++        SecItemCopyMatching((__bridge CFDictionaryRef)identityQuery, (CFTypeRef *)&myIdent);
++        
++    } else if (resolvableCert != nil && resolvableKey != nil) {
++        //RCTLogWarn(@"startTLS: Attempting client certificate authentication");
++        NSString *pemCert = [resolvableCert resolve];
++        NSString *pemKey = [resolvableKey resolve];
++        if (pemCert && pemKey) {
++            myIdent = [self createIdentityWithCert:pemCert
++                                        privateKey:pemKey
++                                          settings:settings];
++            //RCTLogWarn(@"startTLS: Identity creation %@", myIdent ? @"successful" : @"failed");
++        }
++    }
++    
++    if (myIdent) {
++        if (_clientIdentity) { CFRelease(_clientIdentity); }
++        _clientIdentity = (SecIdentityRef)CFRetain(myIdent);
++        
++        NSArray *myCerts = @[ (__bridge id)myIdent ];
++        [settings setObject:myCerts
++                     forKey:(NSString *)kCFStreamSSLCertificates];
++        //RCTLogWarn(@"startTLS: Client certificates configured successfully");
++    }
++
++    //RCTLogWarn(@"startTLS: Final settings: %@", settings);
+     _tls = true;
+     [_tcpSocket startTLS:settings];
+ }
+@@ -244,8 +351,7 @@ - (BOOL)setSecureContext:(NSDictionary *)tlsOptions {
+     CFStringRef password = CFSTR("");
+     const void *keys[] = {kSecImportExportPassphrase};
+     const void *values[] = {password};
+-    CFDictionaryRef options =
+-        CFDictionaryCreate(NULL, keys, values, 1, NULL, NULL);
++    CFDictionaryRef options = CFDictionaryCreate(NULL, keys, values, 1, NULL, NULL);
+ 
+     CFArrayRef items = CFArrayCreate(NULL, 0, 0, NULL);
+ 
+@@ -265,14 +371,18 @@ - (BOOL)setSecureContext:(NSDictionary *)tlsOptions {
+     CFArrayRef myCerts = CFArrayCreate(NULL, (void *)certArray, 1, NULL);
+ 
+     _tlsSettings = [NSMutableDictionary dictionary];
+-    [(NSMutableDictionary*) _tlsSettings setObject:[NSNumber numberWithBool:YES]
+-                                            forKey:(NSString *)kCFStreamSSLIsServer];
+-    [(NSMutableDictionary*) _tlsSettings setObject:[NSNumber numberWithInteger:2]
+-                                            forKey:GCDAsyncSocketSSLProtocolVersionMin];
+-    [(NSMutableDictionary*) _tlsSettings setObject:[NSNumber numberWithInteger:8]
+-                                            forKey:GCDAsyncSocketSSLProtocolVersionMax];
+-    [(NSMutableDictionary*) _tlsSettings setObject:(id)CFBridgingRelease(myCerts)
+-                                            forKey:(NSString *)kCFStreamSSLCertificates];
++    [(NSMutableDictionary *)_tlsSettings
++        setObject:[NSNumber numberWithBool:YES]
++           forKey:(NSString *)kCFStreamSSLIsServer];
++    [(NSMutableDictionary *)_tlsSettings
++        setObject:[NSNumber numberWithInteger:2]
++           forKey:GCDAsyncSocketSSLProtocolVersionMin];
++    [(NSMutableDictionary *)_tlsSettings
++        setObject:[NSNumber numberWithInteger:8]
++           forKey:GCDAsyncSocketSSLProtocolVersionMax];
++    [(NSMutableDictionary *)_tlsSettings
++        setObject:(id)CFBridgingRelease(myCerts)
++           forKey:(NSString *)kCFStreamSSLCertificates];
+     _tls = true;
+     return true;
+ }
+@@ -390,6 +500,13 @@ - (void)socketDidSecure:(GCDAsyncSocket *)sock {
+ - (void)socket:(GCDAsyncSocket *)sock
+       didReceiveTrust:(SecTrustRef)trust
+     completionHandler:(void (^)(BOOL shouldTrustPeer))completionHandler {
++
++    // Store the trust reference
++    if (_peerTrust) {
++        CFRelease(_peerTrust);
++    }
++    _peerTrust = (SecTrustRef)CFRetain(trust);
++
+     // Check if we should check the validity
+     if (!_checkValidity) {
+         completionHandler(YES);
+@@ -397,8 +514,7 @@ - (void)socket:(GCDAsyncSocket *)sock
+     }
+ 
+     // Server certificate
+-    SecCertificateRef serverCertificate =
+-        SecTrustGetCertificateAtIndex(trust, 0);
++    SecCertificateRef serverCertificate = SecTrustGetCertificateAtIndex(trust, 0);
+     CFDataRef serverCertificateData = SecCertificateCopyData(serverCertificate);
+     const UInt8 *const serverData = CFDataGetBytePtr(serverCertificateData);
+     const CFIndex serverDataSize = CFDataGetLength(serverCertificateData);
+@@ -406,39 +522,23 @@ - (void)socket:(GCDAsyncSocket *)sock
+                                    length:(NSUInteger)serverDataSize];
+ 
+     // Local certificate
+-    NSURL *certUrl = [[NSURL alloc] initWithString:_certPath];
+-    NSString *pem = [[NSString alloc] initWithContentsOfURL:certUrl
+-                                                   encoding:NSUTF8StringEncoding
+-                                                      error:NULL];
+-
+-    // Strip PEM header and footers. We don't support multi-certificate PEM.
+-    NSMutableString *pemMutable =
+-        [pem stringByTrimmingCharactersInSet:
+-                 NSCharacterSet.whitespaceAndNewlineCharacterSet]
+-            .mutableCopy;
++    NSString *pemCaCert = [_resolvableCaCert resolve];
++    if (!pemCaCert) {
++        RCTLogWarn(@"Failed to resolve CA certificate");
++        completionHandler(NO);
++        return;
++    }
+ 
+     // Strip PEM header and footer
+-    [pemMutable
+-        replaceOccurrencesOfString:@"-----BEGIN CERTIFICATE-----"
+-                        withString:@""
+-                           options:(NSStringCompareOptions)(NSAnchoredSearch |
+-                                                            NSLiteralSearch)
+-                             range:NSMakeRange(0, pemMutable.length)];
+-
+-    [pemMutable
+-        replaceOccurrencesOfString:@"-----END CERTIFICATE-----"
+-                        withString:@""
+-                           options:(NSStringCompareOptions)(NSAnchoredSearch |
+-                                                            NSBackwardsSearch |
+-                                                            NSLiteralSearch)
+-                             range:NSMakeRange(0, pemMutable.length)];
+-
+-    NSData *pemData = [[NSData alloc]
+-        initWithBase64EncodedString:pemMutable
++    NSString *cleanedCaCert = [self stripPEMHeader:pemCaCert
++                                            prefix:@"CERTIFICATE"];
++    NSData *pemCaCertData = [[NSData alloc]
++        initWithBase64EncodedString:cleanedCaCert
+                             options:
+                                 NSDataBase64DecodingIgnoreUnknownCharacters];
++
+     SecCertificateRef localCertificate =
+-        SecCertificateCreateWithData(NULL, (CFDataRef)pemData);
++        SecCertificateCreateWithData(NULL, (CFDataRef)pemCaCertData);
+     if (!localCertificate) {
+         [NSException raise:@"Configuration invalid"
+                     format:@"Failed to parse PEM certificate"];
+@@ -496,6 +596,424 @@ - (void)socketDidDisconnect:(GCDAsyncSocket *)sock withError:(NSError *)err {
+         withError:(!err || err.code == GCDAsyncSocketClosedError ? nil : err)];
+ }
+ 
++typedef NS_ENUM(NSInteger, PEMType) {
++    PEMTypeUnknown,
++    PEMTypeCertificate,
++    PEMTypePKCS1,
++    PEMTypePKCS8
++};
++
++- (PEMType)detectPEMType:(NSString *)pemData {
++    if ([pemData containsString:@"BEGIN CERTIFICATE"]) {
++        return PEMTypeCertificate;
++    }
++    if ([pemData containsString:@"BEGIN PRIVATE KEY"]) {
++        return PEMTypePKCS8;
++    }
++    if ([pemData containsString:@"BEGIN RSA PRIVATE KEY"]) {
++        return PEMTypePKCS1;
++    }
++    return PEMTypeUnknown;
++}
++
++- (NSData *)getDataFromPEM:(NSString *)pemData error:(NSError **)error {
++    PEMType type = [self detectPEMType:pemData];
++    if (type == PEMTypeUnknown) {
++        if (error) {
++            *error = [NSError
++                errorWithDomain:RCTTCPErrorDomain
++                           code:-1
++                       userInfo:@{
++                           NSLocalizedDescriptionKey : @"Invalid PEM format"
++                       }];
++        }
++        return nil;
++    }
++
++    // Extract the base64 data between headers
++    NSString *prefix;
++    switch (type) {
++    case PEMTypeCertificate:
++        prefix = @"CERTIFICATE";
++        break;
++    case PEMTypePKCS8:
++        prefix = @"PRIVATE KEY";
++        break;
++    case PEMTypePKCS1:
++        prefix = @"RSA PRIVATE KEY";
++        break;
++    default:
++        return nil;
++    }
++
++    NSString *cleanedPEM = [self stripPEMHeader:pemData prefix:prefix];
++    NSData *decodedData = [[NSData alloc]
++        initWithBase64EncodedString:cleanedPEM
++                            options:
++                                NSDataBase64DecodingIgnoreUnknownCharacters];
++    // For PKCS#8, extract the RSA key
++    if (type == PEMTypePKCS8) {
++        return [self extractRSAKeyFromPKCS8:decodedData error:error];
++    }
++
++    return decodedData;
++}
++
++- (NSData *)extractRSAKeyFromPKCS8:(NSData *)pkcs8Data error:(NSError **)error {
++    // RSA 2048-bit PKCS#8 header (26 bytes)
++    const uint8_t rsa2048Prefix[] = {
++        0x30, 0x82, 0x04, 0xBE, 0x02, 0x01, 0x00, 0x30,
++        0x0D, 0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7,
++        0x0D, 0x01, 0x01, 0x01, 0x05, 0x00, 0x04, 0x82,
++        0x04, 0xA8
++    };
++    
++    // Check for minimum data length
++    if (pkcs8Data.length <= sizeof(rsa2048Prefix)) {
++        if (error) {
++            *error = [NSError errorWithDomain:RCTTCPErrorDomain
++                                         code:-1
++                                     userInfo:@{
++                NSLocalizedDescriptionKey: @"Invalid PKCS#8 data: too short"
++            }];
++        }
++        return nil;
++    }
++    
++    // Verify RSA 2048-bit key prefix - We need a ASN1 decoder to support more !!!
++    if (memcmp(pkcs8Data.bytes, rsa2048Prefix, sizeof(rsa2048Prefix)) != 0) {
++        if (error) {
++            *error = [NSError errorWithDomain:RCTTCPErrorDomain
++                                         code:-1
++                                     userInfo:@{
++                NSLocalizedDescriptionKey: @"Unsupported key format: only RSA 2048-bit keys are supported"
++            }];
++        }
++        return nil;
++    }
++    
++    // Extract the RSA private key data
++    return [pkcs8Data subdataWithRange:NSMakeRange(sizeof(rsa2048Prefix),
++                                                   pkcs8Data.length - sizeof(rsa2048Prefix))];
++}
++
++- (SecIdentityRef)createIdentityWithCert:(NSString *)pemCert
++                              privateKey:(NSString *)pemKey
++                                settings:(NSDictionary *)settings {
++    OSStatus status = -1;
++    SecIdentityRef identity = NULL;
++
++    // Get aliases from settings
++    NSString *certAlias = settings[@"certAlias"] ?: @"clientTlsCert";
++    NSString *keyAlias = settings[@"keyAlias"] ?: @"clientTlsKey";
++
++    NSError *pemError = nil;
++    NSData *certData = [self getDataFromPEM:pemCert error:&pemError];
++    NSData *keyData = [self getDataFromPEM:pemKey error:&pemError];
++
++    if (pemError || !certData || !keyData) {
++        RCTLogWarn(@"createIdentity: Failed to process PEM data: %@", pemError);
++        return NULL;
++    }
++
++    // Creates a certificate object from its DER representation
++    SecCertificateRef cert = SecCertificateCreateWithData(NULL, (__bridge CFDataRef)certData);
++    if (!cert) {
++        RCTLogWarn(@"createIdentity: Failed to create certificate from data");
++        return NULL;
++    }
++    // Import certificate in keychain
++    NSDictionary *deleteCertQuery = @{
++        (__bridge id)kSecClass : (__bridge id)kSecClassCertificate,
++        (__bridge id)kSecAttrLabel: certAlias,
++        (__bridge id)kSecReturnRef : @YES
++    };
++    status = SecItemDelete((__bridge CFDictionaryRef)deleteCertQuery);
++
++    NSDictionary *certAttributes = @{
++        //(__bridge id)kSecClass : (__bridge id)kSecClassCertificate,
++        (__bridge id)kSecValueRef : (__bridge id)cert,
++        (__bridge id)kSecAttrLabel : certAlias,
++    };
++    status = SecItemAdd((__bridge CFDictionaryRef)certAttributes, NULL);
++    if (status != errSecSuccess && status != errSecDuplicateItem) {
++        RCTLogWarn(@"createIdentity: Failed to store certificate, status: %d",
++                   (int)status);
++        CFRelease(cert);
++        return NULL;
++    }
++                                    
++    NSDictionary *privateKeyAttributes = @{
++        (__bridge id)kSecAttrKeyType : (__bridge id)kSecAttrKeyTypeRSA,
++        (__bridge id)kSecAttrKeyClass : (__bridge id)kSecAttrKeyClassPrivate
++    };
++    CFErrorRef error = NULL;
++    SecKeyRef privateKey = SecKeyCreateWithData(
++        (__bridge CFDataRef)keyData,
++        (__bridge CFDictionaryRef)privateKeyAttributes, &error);
++    if (!privateKey) {
++        RCTLogWarn(@"createIdentity: Failed to create private key: %@", error);
++        CFRelease(cert);
++        if (error)
++            CFRelease(error);
++        return NULL;
++    }
++
++    NSDictionary *deleteKeyQuery = @{
++        (__bridge id)kSecClass : (__bridge id)kSecClassKey,
++        (__bridge id)kSecAttrLabel: keyAlias,
++        (__bridge id)kSecReturnRef : @YES
++    };
++    status = SecItemDelete((__bridge CFDictionaryRef)deleteKeyQuery);
++
++    // Add the private key to keychain
++    NSDictionary *keyAttributes = @{
++        (__bridge id)kSecValueRef: (__bridge id)privateKey,
++        (__bridge id)kSecAttrLabel : keyAlias
++    };
++    status = SecItemAdd((__bridge CFDictionaryRef)keyAttributes, NULL);
++    if (status != errSecSuccess && status != errSecDuplicateItem) {
++        RCTLogWarn(@"createIdentity: Failed to store private key, status: %d",
++                   (int)status);
++        CFRelease(cert);
++        CFRelease(privateKey);
++        return NULL;
++    }
++                                    
++    NSDictionary *identityQuery = @{
++        (__bridge id)kSecClass : (__bridge id)kSecClassIdentity,
++        (__bridge id)kSecReturnRef : @YES,
++        (__bridge id)kSecAttrLabel : certAlias
++    };
++    status = SecItemCopyMatching((__bridge CFDictionaryRef)identityQuery,
++                                 (CFTypeRef *)&identity);
++    
++    if (status != errSecSuccess || !identity) {
++        RCTLogWarn(@"createIdentity: Failed to find identity, status: %d",
++                   (int)status);
++    }
++    
++    // Clean up
++    CFRelease(cert);
++    CFRelease(privateKey);
++    
++    return identity;
++}
++
++- (NSString *)stripPEMHeader:(NSString *)pemData prefix:(NSString *)prefix {
++    NSMutableString *cleaned = [pemData mutableCopy];
++
++    // Remove header
++    NSString *header =
++        [NSString stringWithFormat:@"-----BEGIN %@-----", prefix];
++    [cleaned replaceOccurrencesOfString:header
++                             withString:@""
++                                options:NSLiteralSearch
++                                  range:NSMakeRange(0, cleaned.length)];
++
++    // Remove footer
++    NSString *footer = [NSString stringWithFormat:@"-----END %@-----", prefix];
++    [cleaned replaceOccurrencesOfString:footer
++                             withString:@""
++                                options:NSLiteralSearch
++                                  range:NSMakeRange(0, cleaned.length)];
++
++    // Remove whitespace and newlines
++    NSArray *components =
++        [cleaned componentsSeparatedByCharactersInSet:
++                     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
++    NSString *result = [components componentsJoinedByString:@""];
++
++    return result;
++}
++
+++ (BOOL)hasIdentity:(NSDictionary *)aliases {
++    NSString *certAlias = aliases[@"certAlias"];
++    if (!certAlias) {
++        return NO;
++    }
++    NSDictionary *identityQuery = @{
++        (__bridge id)kSecClass : (__bridge id)kSecClassIdentity,
++        (__bridge id)kSecAttrLabel : certAlias
++    };
++    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)identityQuery, (CFTypeRef *)NULL);
++    return status == errSecSuccess;
++}
++
++- (NSDictionary *)getPeerCertificate {
++    NSDictionary *result = nil;
++    
++    if (!_tcpSocket || !_tls || !_peerTrust) {
++        return nil;
++    }
++
++    SecCertificateRef certificate = SecTrustGetCertificateAtIndex(_peerTrust, 0);
++    if (!certificate) {
++        return nil;
++    }
++
++    result = [self certificateToDict:certificate detailed:YES];
++    return result;
++}
++
++- (NSDictionary *)getCertificate {
++    NSDictionary *result = nil;
++    
++    if (!_tcpSocket || !_tls) {
++        return nil;
++    }
++    
++    SecCertificateRef certificate = NULL;
++    if (_clientIdentity) {
++        // If we have a client identity, get the certificate from it
++        OSStatus status = SecIdentityCopyCertificate(_clientIdentity, &certificate);
++        if (status != errSecSuccess) {
++            RCTLogWarn(@"getCertificate: Failed to get certificate from identity, status: %d", (int)status);
++            return nil;
++        }
++    }
++
++    result = [self certificateToDict:certificate detailed:YES];
++    CFRelease(certificate);
++
++    return result;
++}
++
++// We need an ASN1 decoder to parse properly but for my case I only need modulus
++// and exponent In addition SecCertificateCopyNormalizedIssuerSequence has some
++// issues since it normalizes issuer and we don't want that
++- (NSDictionary *)certificateToDict:(SecCertificateRef)certificate
++                    detailed:(BOOL)detailed {
++    NSMutableDictionary *certInfo = [NSMutableDictionary dictionary];
++
++    // Get public key info
++    SecKeyRef publicKey = SecCertificateCopyKey(certificate);
++    if (publicKey) {
++        CFDictionaryRef attributes = SecKeyCopyAttributes(publicKey);
++        if (attributes) {
++            // Get key size (bits)
++            NSNumber *keySize =
++                CFDictionaryGetValue(attributes, kSecAttrKeySizeInBits);
++            certInfo[@"bits"] = keySize;
++
++            // Get modulus and exponent for RSA keys
++            CFDataRef keyData =
++                SecKeyCopyExternalRepresentation(publicKey, NULL);
++            if (keyData) {
++                NSData *keyDataNS = (__bridge NSData *)keyData;
++
++                // For RSA, the external representation is a DER-encoded
++                // RSAPublicKey
++                if ([self isRSAKey:publicKey]) {
++                    NSArray *components = [self parseRSAPublicKey:keyDataNS];
++                    if (components.count == 2) {
++                        certInfo[@"modulus"] = components[0];
++                        certInfo[@"exponent"] = [NSString stringWithFormat:@"0x%@", components[1]];
++                    }
++                }
++
++                // Add base64 encoded public key
++                certInfo[@"pubkey"] = [keyDataNS base64EncodedStringWithOptions:0];
++                CFRelease(keyData);
++            }
++            CFRelease(attributes);
++        }
++        CFRelease(publicKey);
++    }
++
++    // Get subject
++    CFStringRef subjectName = NULL;
++    OSStatus status = SecCertificateCopyCommonName(certificate, &subjectName);
++    if (status == errSecSuccess && subjectName) {
++        certInfo[@"subject"] =
++            @{@"CN" : (__bridge_transfer NSString *)subjectName};
++    }
++
++    // Get issuer using the normalized sequence
++    CFDataRef issuerSequence =
++        SecCertificateCopyNormalizedIssuerSequence(certificate);
++    if (issuerSequence) {
++        CFStringRef issuerName = NULL;
++        status = SecCertificateCopyCommonName(certificate, &issuerName);
++        if (status == errSecSuccess && issuerName) {
++            certInfo[@"issuer"] =
++                @{@"CN" : (__bridge_transfer NSString *)issuerName};
++        }
++        CFRelease(issuerSequence);
++    }
++
++    return certInfo;
++}
++
++- (BOOL)isRSAKey:(SecKeyRef)key {
++    CFDictionaryRef attributes = SecKeyCopyAttributes(key);
++    if (!attributes)
++        return NO;
++
++    CFStringRef keyType = CFDictionaryGetValue(attributes, kSecAttrKeyType);
++    BOOL isRSA = keyType && CFEqual(keyType, kSecAttrKeyTypeRSA);
++    CFRelease(attributes);
++
++    return isRSA;
++}
++
++- (NSArray *)parseRSAPublicKey:(NSData *)keyData {
++    // Parse DER-encoded RSAPublicKey structure
++    const uint8_t *bytes = keyData.bytes;
++    NSInteger length = keyData.length;
++    
++    // Skip header and length bytes
++    if (length < 2 || bytes[0] != 0x30) return nil;
++    
++    NSInteger idx = 2;
++    if (bytes[1] & 0x80) {
++        idx += (bytes[1] & 0x7F);
++    }
++    
++    // Read modulus
++    if (idx >= length || bytes[idx] != 0x02) return nil;
++    idx++;
++    
++    NSInteger modulusLength = bytes[idx++];
++    if (modulusLength & 0x80) {
++        int lenBytes = modulusLength & 0x7F;
++        modulusLength = 0;
++        for (int i = 0; i < lenBytes; i++) {
++            modulusLength = (modulusLength << 8) | bytes[idx++];
++        }
++    }
++    
++    // Skip leading zero if present for modulus
++    NSInteger startOffset = 0;
++    if (bytes[idx] == 0x00) {
++        startOffset = 1;
++        modulusLength--;
++    }
++    
++    NSMutableString *modulus = [NSMutableString string];
++    for (NSInteger i = 0; i < modulusLength; i++) {
++        [modulus appendFormat:@"%02X", bytes[idx + startOffset + i]];
++    }
++    idx += modulusLength + startOffset;
++    
++    // Read exponent
++    if (idx >= length || bytes[idx] != 0x02) return nil;
++    idx++;
++    
++    NSInteger exponentLength = bytes[idx++];
++    // Build exponent hex string
++    NSMutableString *exponentHex = [NSMutableString string];
++    for (NSInteger i = 0; i < exponentLength; i++) {
++        [exponentHex appendFormat:@"%02X", bytes[idx + i]];
++    }
++    
++    // Remove leading zeros from the exponent
++    NSRegularExpression *re = [NSRegularExpression regularExpressionWithPattern:@"^0+(?=[0-9A-F]+)" options:0 error:nil];
++    NSString *exponent = [re stringByReplacingMatchesInString:exponentHex options:0 range:NSMakeRange(0, exponentHex.length) withTemplate:@""];
++    
++    return @[modulus, exponent];
++}
++
+ - (NSError *)badInvocationError:(NSString *)errMsg {
+     NSDictionary *userInfo =
+         [NSDictionary dictionaryWithObject:errMsg
+diff --git a/node_modules/react-native-tcp-socket/ios/TcpSockets.m b/node_modules/react-native-tcp-socket/ios/TcpSockets.m
+index 3a9783a..fc99b73 100644
+--- a/node_modules/react-native-tcp-socket/ios/TcpSockets.m
++++ b/node_modules/react-native-tcp-socket/ios/TcpSockets.m
+@@ -175,6 +175,40 @@ - (TcpSocketClient *)createSocket:(nonnull NSNumber *)cId {
+     [client resume];
+ }
+ 
++RCT_EXPORT_METHOD(hasIdentity:(nonnull NSDictionary *)aliases
++                  resolver:(RCTPromiseResolveBlock)resolve
++                  rejecter:(RCTPromiseRejectBlock)reject) {
++    // Since this is a static check of the keychain, we don't need a client instance
++    BOOL hasIdentity = [TcpSocketClient hasIdentity:aliases];
++    resolve(@(hasIdentity));
++}
++
++RCT_EXPORT_METHOD(getPeerCertificate:(nonnull NSNumber *)cId
++                  resolver:(RCTPromiseResolveBlock)resolve
++                  rejecter:(RCTPromiseRejectBlock)reject) {
++    TcpSocketClient *client = [self findClient:cId];
++    if (!client) {
++        reject(@"NOT_FOUND", @"Client not found", nil);
++        return;
++    }
++    
++    NSDictionary *cert = [client getPeerCertificate];
++    resolve(cert ?: [NSNull null]);
++}
++
++RCT_EXPORT_METHOD(getCertificate:(nonnull NSNumber *)cId
++                  resolver:(RCTPromiseResolveBlock)resolve
++                  rejecter:(RCTPromiseRejectBlock)reject) {
++    TcpSocketClient *client = [self findClient:cId];
++    if (!client) {
++        reject(@"NOT_FOUND", @"Client not found", nil);
++        return;
++    }
++    
++    NSDictionary *cert = [client getCertificate];
++    resolve(cert ?: [NSNull null]);
++}
++
+ - (void)onWrittenData:(TcpSocketClient *)client msgId:(NSNumber *)msgId {
+     [self sendEventWithName:@"written"
+                        body:@{
+diff --git a/node_modules/react-native-tcp-socket/lib/types/Socket.d.ts b/node_modules/react-native-tcp-socket/lib/types/Socket.d.ts
+index fc793b2..92cbd46 100644
+--- a/node_modules/react-native-tcp-socket/lib/types/Socket.d.ts
++++ b/node_modules/react-native-tcp-socket/lib/types/Socket.d.ts
+@@ -119,9 +119,8 @@ export default class Socket extends EventEmitter<SocketEvents & ReadableEvents,
+     setTimeout(timeout: number, callback?: (() => void) | undefined): Socket;
+     /**
+      * @private
+-     * @param {number} [timeout]
+      */
+-    private _activateTimer;
++    private _resetTimeout;
+     /**
+      * @private
+      */
+diff --git a/node_modules/react-native-tcp-socket/lib/types/TLSSocket.d.ts b/node_modules/react-native-tcp-socket/lib/types/TLSSocket.d.ts
+index bc1f2b7..c512abd 100644
+--- a/node_modules/react-native-tcp-socket/lib/types/TLSSocket.d.ts
++++ b/node_modules/react-native-tcp-socket/lib/types/TLSSocket.d.ts
+@@ -11,6 +11,19 @@
+  * @extends {Socket}
+  */
+ export default class TLSSocket extends Socket {
++    /**
++     * Checks if a certificate identity exists in the keychain
++     * @param {object} options Object containing the identity aliases
++     * @param {string} [options.androidKeyStore] The android keystore type
++     * @param {string} [options.certAlias] The certificate alias
++     * @param {string} [options.keyAlias] The key alias
++     * @returns {Promise<boolean>} Promise resolving to true if identity exists
++     */
++    static hasIdentity(options?: {
++        androidKeyStore: string | undefined;
++        certAlias: string | undefined;
++        keyAlias: string | undefined;
++    }): Promise<boolean>;
+     /**
+      * @private
+      * Resolves the asset source if necessary and registers the resolved key.
+diff --git a/node_modules/react-native-tcp-socket/lib/types/index.d.ts b/node_modules/react-native-tcp-socket/lib/types/index.d.ts
+index 328f349..79ac618 100644
+--- a/node_modules/react-native-tcp-socket/lib/types/index.d.ts
++++ b/node_modules/react-native-tcp-socket/lib/types/index.d.ts
+@@ -11,6 +11,7 @@ declare namespace _default {
+     export { Socket };
+     export { TLSServer };
+     export { TLSSocket };
++    export const hasIdentity: typeof import("./TLSSocket").default.hasIdentity;
+ }
+ export default _default;
+ /**
+diff --git a/node_modules/react-native-tcp-socket/src/Socket.js b/node_modules/react-native-tcp-socket/src/Socket.js
+index 4268015..6ed2141 100644
+--- a/node_modules/react-native-tcp-socket/src/Socket.js
++++ b/node_modules/react-native-tcp-socket/src/Socket.js
+@@ -182,10 +182,11 @@ export default class Socket extends EventEmitter {
+      * @param {() => void} [callback]
+      */
+     setTimeout(timeout, callback) {
+-        if (timeout === 0) {
++        this._timeoutMsecs = timeout;
++        if (this._timeoutMsecs === 0) {
+             this._clearTimeout();
+         } else {
+-            this._activateTimer(timeout);
++            this._resetTimeout();
+         }
+         if (callback) this.once('timeout', callback);
+         return this;
+@@ -193,15 +194,15 @@ export default class Socket extends EventEmitter {
+ 
+     /**
+      * @private
+-     * @param {number} [timeout]
+      */
+-    _activateTimer(timeout) {
+-        if (timeout !== undefined) this._timeoutMsecs = timeout;
+-        this._clearTimeout();
+-        this._timeout = setTimeout(() => {
++    _resetTimeout() {
++        if (this._timeoutMsecs !== 0) {
+             this._clearTimeout();
+-            this.emit('timeout');
+-        }, this._timeoutMsecs);
++            this._timeout = setTimeout(() => {
++                this._clearTimeout();
++                this.emit('timeout');
++            }, this._timeoutMsecs);
++        }
+     }
+ 
+     /**
+@@ -327,7 +328,6 @@ export default class Socket extends EventEmitter {
+      * @return {boolean}
+      */
+     write(buffer, encoding, cb) {
+-        const self = this;
+         if (this._pending || this._destroyed) throw new Error('Socket is closed.');
+ 
+         const generatedBuffer = this._generateSendBuffer(buffer, encoding);
+@@ -340,7 +340,7 @@ export default class Socket extends EventEmitter {
+                 this._msgEvtEmitter.removeListener('written', msgEvtHandler);
+                 this._writeBufferSize -= generatedBuffer.byteLength;
+                 this._lastRcvMsgId = msgId;
+-                if (self._timeout) self._activateTimer();
++                this._resetTimeout();
+                 if (this.writableNeedDrain && this._lastSentMsgId === msgId) {
+                     this.writableNeedDrain = false;
+                     this.emit('drain');
+@@ -434,6 +434,7 @@ export default class Socket extends EventEmitter {
+      */
+     _onDeviceDataEvt = (/** @type {{ id: number; data: string; }} */ evt) => {
+         if (evt.id !== this._id) return;
++        this._resetTimeout();
+         if (!this._paused) {
+             const bufferData = Buffer.from(evt.data, 'base64');
+             this._bytesRead += bufferData.byteLength;
+diff --git a/node_modules/react-native-tcp-socket/src/TLSSocket.js b/node_modules/react-native-tcp-socket/src/TLSSocket.js
+index d538638..f308991 100644
+--- a/node_modules/react-native-tcp-socket/src/TLSSocket.js
++++ b/node_modules/react-native-tcp-socket/src/TLSSocket.js
+@@ -66,6 +66,22 @@ export default class TLSSocket extends Socket {
+         Sockets.startTLS(this._id, this._options);
+     }
+ 
++    /**
++     * Checks if a certificate identity exists in the keychain
++     * @param {object} options Object containing the identity aliases
++     * @param {string} [options.androidKeyStore] The android keystore type
++     * @param {string} [options.certAlias] The certificate alias
++     * @param {string} [options.keyAlias] The key alias
++     * @returns {Promise<boolean>} Promise resolving to true if identity exists
++     */
++    static hasIdentity(options = {}) {
++        return Sockets.hasIdentity({
++            androidKeyStore: options.androidKeyStore,
++            certAlias: options.certAlias,
++            keyAlias: options.keyAlias,
++        });
++    }
++
+     getCertificate() {
+         return Sockets.getCertificate(this._id);
+     }
+diff --git a/node_modules/react-native-tcp-socket/src/index.js b/node_modules/react-native-tcp-socket/src/index.js
+index e04e240..2237dbc 100644
+--- a/node_modules/react-native-tcp-socket/src/index.js
++++ b/node_modules/react-native-tcp-socket/src/index.js
+@@ -112,6 +112,7 @@ export default {
+     Socket,
+     TLSServer,
+     TLSSocket,
++    hasIdentity: TLSSocket.hasIdentity,
+ };
+ 
+ // @ts-ignore
+@@ -128,4 +129,5 @@ module.exports = {
+     Socket,
+     TLSServer,
+     TLSSocket,
++    hasIdentity: TLSSocket.hasIdentity,
+ };
