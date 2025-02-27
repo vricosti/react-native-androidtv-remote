@@ -17,10 +17,15 @@ or npm:
 
 `npm install --save react-native-androidtv-remote react-native-modpow`
 
-At the time of writing these instructions, my dev/more-node-tls-compliant-ios branch has not yet been merged into react-native-tcp-sockets, so it is necessary to patch it using patch-package.  
-So inside your project add patch-package:  
+**BEWARE:** at the time of writing these instructions, my dev/more-node-tls-compliant-ios branch has not yet been merged into react-native-tcp-sockets, so it is necessary to patch it using patch-package.  
 
-`yarn add patch-package` and copy the folder example/patches inside your project and add inside package.json:  
+So inside your project add patch-package:  
+`yarn add patch-package`
+  
+Then copy the folder example/patches inside your project and add inside package.json  
+
+![react-native-tcp-socket-patch](https://github.com/user-attachments/assets/f7b6005a-edb9-4f47-9b8e-170686a7eb27)
+
 
 ```
 "scripts": {
